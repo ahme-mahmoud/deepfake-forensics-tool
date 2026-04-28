@@ -42,7 +42,7 @@ This project provides a forensic investigation tool that:
 ---
 
 ## 📂 Project Structure
-
+```
 deepfake-forensics-tool/
 │
 ├── data/                  
@@ -59,7 +59,7 @@ deepfake-forensics-tool/
 ├── app.py                 
 ├── requirements.txt
 └── README.md
-
+```
 ---
 
 ## 🚀 Installation
