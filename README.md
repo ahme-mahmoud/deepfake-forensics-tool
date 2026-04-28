@@ -308,4 +308,4 @@ MIT License — free to use for academic and research purposes.
 
 ---
 
-*Built for the Digital Forensics & AI Security university module.*
+*Built for the Digital Forensics 
