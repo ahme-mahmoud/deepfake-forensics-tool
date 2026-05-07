@@ -1,34 +1,34 @@
 # ============================================================
-# DeepFake Forensics Tool — Python Dependencies
+# AI-Powered Deepfake & Image Manipulation Detection Tool v3.0
 # ============================================================
-# Install with:
-#   pip install -r requirements.txt
+# Install: pip install -r requirements.txt
 
-# ── Core image processing ────────────────────────────────────
+# ── Core Image Processing ─────────────────────────────────────
 Pillow>=10.0.0
-opencv-python>=4.8.0          # use opencv-python-headless on servers
+opencv-python>=4.8.0
 numpy>=1.24.0
 scikit-image>=0.21.0
 
-# ── Scientific computing ─────────────────────────────────────
+# ── Scientific Computing ──────────────────────────────────────
 scipy>=1.11.0
 
-# ── Visualisation ────────────────────────────────────────────
-matplotlib>=3.7.0
+# ── Machine Learning ─────────────────────────────────────────
+scikit-learn>=1.3.0
 
-# ── Report generation ────────────────────────────────────────
-reportlab>=4.0.0              # optional: for PDF report output
+# ── Explainability ────────────────────────────────────────────
+shap>=0.42.0
 
-# ── Machine learning (optional — for CNN deepfake model) ─────
+# ── Report Generation ─────────────────────────────────────────
+reportlab>=4.0.0
+
+# ── Dashboard ─────────────────────────────────────────────────
+streamlit>=1.27.0
+
+# ── Optional: Deep Learning (upgrade path) ───────────────────
 # torch>=2.0.0
 # torchvision>=0.15.0
-# facenet-pytorch>=2.5.3      # FaceNet embedding model
+# facenet-pytorch>=2.5.3      # FaceNet embeddings
+# tensorflow>=2.13.0          # CNN classifier (EfficientNet)
 
-# ── Explainability (bonus) ───────────────────────────────────
-# shap>=0.42.0
-
-# ── Streamlit dashboard (bonus) ──────────────────────────────
-# streamlit>=1.27.0
-
-# ── Testing ──────────────────────────────────────────────────
+# ── Testing ───────────────────────────────────────────────────
 pytest>=7.4.0
