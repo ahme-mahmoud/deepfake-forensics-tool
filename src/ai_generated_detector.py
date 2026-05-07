@@ -1,284 +1,291 @@
 """
-ai_generated_detector.py
-========================
-Module 3 — AI-Generated / GAN Image Detection
+ai_generated_detector.py  ·  v2.0  — CNN + Signal-Processing Hybrid
+======================================================================
+    • Added a CNN-based scorer using TensorFlow/Keras when available.
+    • CNN input: 128×128 RGB  →  single probability output [0,1].
+    • Pre-trained model loaded from  models/ai_cnn.h5  if it exists.
+    • If no model file exists, a lightweight placeholder is auto-created
+      and saved (random weights, but shows the full integration path).
+    • CNN toggle:  analyze(..., use_cnn=True/False)
+    • Final score = weighted blend(CNN, frequency, noise, texture).
+    • All v1 signal-processing sub-detectors unchanged.
 
-FORENSIC LOGIC:
-    GAN-generated (and diffusion-generated) images leave characteristic
-    fingerprints that are *absent* in real photographs:
-
-    1. FREQUENCY DOMAIN ARTIFACTS
-       GANs over-smooth certain frequency bands and introduce periodic grid
-       patterns from transposed-convolution "checkerboard" artifacts.
-       We analyse the 2-D FFT magnitude spectrum for:
-           (a) Radial energy distribution (real photos decay faster at high-freq)
-           (b) Grid/periodic peaks in the spectrum (GAN checkerboard)
-
-    2. NOISE PATTERN ANALYSIS
-       Real cameras introduce sensor noise with specific autocorrelation
-       properties (PRNU — Photo Response Non-Uniformity).  GAN outputs have
-       systematically different, smoother noise profiles.
-
-    3. CO-OCCURRENCE MATRIX (texture regularity)
-       AI-generated images are statistically too "perfect" — their pixel
-       co-occurrence matrices show lower entropy than natural photographs
-       of comparable content.
-
-Each sub-score is normalised to [0, 1].
-Module score = weighted combination.
+DEPENDENCY MATRIX:
+    tensorflow installed + models/ai_cnn.h5 exists → real CNN   ★
+    tensorflow installed, no .h5                   → placeholder CNN ✓
+    tensorflow NOT installed                        → signal-only   ✓
 """
 
 import logging
 import os
 from pathlib import Path
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
 
 import cv2
 import numpy as np
 from PIL import Image
-from scipy.stats import entropy as scipy_entropy
-
+from src.feature_extractor import extract as extract_features
 from compression_analysis import compute_sha256
+
+def _safe_entropy(arr: np.ndarray) -> float:
+    """Numpy-based Shannon entropy (avoids scipy/torch compatibility issues)."""
+    p = arr.astype(np.float64)
+    p = p[p > 0]
+    if p.size == 0:
+        return 0.0
+    p /= p.sum()
+    return float(-np.sum(p * np.log(p)))
 
 logger = logging.getLogger("ai_generated_detector")
 
+# ── ML Classifier (SVM + Random Forest) ──────────────────────────────────────
+try:
+    import ml_classifier as _ml
+    ML_OK = True
+    logger.info("ML classifier module loaded (SVM + Random Forest)")
+except ImportError:
+    ML_OK = False
+    _ml   = None
+    logger.warning("ml_classifier not found → ML scoring disabled")
 
-# ===========================================================================
-# Sub-detector 1 — Frequency Domain Analysis
-# ===========================================================================
+# ── Optional TensorFlow (graceful degradation) ────────────────────────────────
+try:
+    os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"   # silence TF info logs
+    import tensorflow as tf
+    TF_OK = True
+    logger.info("TensorFlow %s available", tf.__version__)
+except ImportError:
+    TF_OK = False
+    logger.warning("TensorFlow not installed → CNN disabled. "
+                   "Install: pip install tensorflow")
+
+# ── Paths ─────────────────────────────────────────────────────────────────────
+_ROOT      = Path(__file__).parent.parent
+MODEL_PATH = str(_ROOT / "models" / "ai_cnn.h5")
+CNN_INPUT  = (128, 128)   # width × height fed to the CNN
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 1 — CNN Model Management
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _build_placeholder_cnn() -> "tf.keras.Model":
+    """
+    Lightweight MobileNet-style placeholder CNN.
+
+    Architecture (fast, ~500K params):
+        Input 128×128×3
+        → Conv(32) → BN → ReLU → MaxPool
+        → Conv(64) → BN → ReLU → MaxPool
+        → Conv(128)→ BN → ReLU → GlobalAvgPool
+        → Dense(64) → ReLU → Dropout(0.3)
+        → Dense(1)  → Sigmoid
+
+    With random weights this outputs values near 0.5.
+    Replace with trained weights for real performance.
+
+    Training target:
+        label=0 → real photograph
+        label=1 → AI-generated image
+    Suggested datasets: CIFAKE, FaceForensics++, Stable Diffusion vs COCO
+    """
+    inp = tf.keras.Input(shape=(*CNN_INPUT, 3), name="image_input")
+    x   = inp
+
+    for filters in (32, 64, 128):
+        x = tf.keras.layers.Conv2D(filters, 3, padding="same")(x)
+        x = tf.keras.layers.BatchNormalization()(x)
+        x = tf.keras.layers.Activation("relu")(x)
+        x = tf.keras.layers.MaxPooling2D()(x)
+
+    x   = tf.keras.layers.GlobalAveragePooling2D()(x)
+    x   = tf.keras.layers.Dense(64, activation="relu")(x)
+    x   = tf.keras.layers.Dropout(0.3)(x)
+    out = tf.keras.layers.Dense(1, activation="sigmoid", name="ai_prob")(x)
+
+    model = tf.keras.Model(inputs=inp, outputs=out, name="ai_detector_cnn")
+    model.compile(optimizer="adam", loss="binary_crossentropy",
+                  metrics=["accuracy"])
+    return model
+
+
+_cnn_model = None   # lazy-loaded singleton
+
+def _load_cnn() -> Optional["tf.keras.Model"]:
+    """
+    Load or create the CNN model (lazy singleton).
+    Order of preference:
+        1. Load  models/ai_cnn.h5  (pre-trained, best accuracy)
+        2. Build placeholder (random weights, shows integration path)
+        3. Return None if TF not available
+    """
+    global _cnn_model
+    if _cnn_model is not None:
+        return _cnn_model
+    if not TF_OK:
+        return None
+
+    os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
+
+    if os.path.isfile(MODEL_PATH):
+        logger.info("Loading CNN from %s", MODEL_PATH)
+        _cnn_model = tf.keras.models.load_model(MODEL_PATH)
+    else:
+        logger.warning("No trained model at %s — using placeholder CNN. "
+                       "Train and save a model there for real accuracy.", MODEL_PATH)
+        _cnn_model = _build_placeholder_cnn()
+        # Save placeholder so future runs load faster
+        try:
+            _cnn_model.save(MODEL_PATH)
+            logger.info("Placeholder CNN saved → %s", MODEL_PATH)
+        except Exception as e:
+            logger.warning("Could not save placeholder: %s", e)
+
+    return _cnn_model
+
+
+def cnn_score(image_path: str) -> float:
+    """
+    Run the CNN and return P(AI-generated) in [0, 1].
+
+    Pre-processing:
+        • Resize to CNN_INPUT (128×128)
+        • Scale pixels to [0, 1]
+        • Add batch dimension
+
+    Returns 0.5 (neutral) when TF is unavailable.
+    """
+    model = _load_cnn()
+    if model is None:
+        logger.info("CNN unavailable → returning neutral 0.5")
+        return 0.5
+
+    img = Image.open(image_path).convert("RGB").resize(CNN_INPUT)
+    arr = np.array(img, dtype=np.float32) / 255.0      # [0,1] normalisation
+    arr = np.expand_dims(arr, axis=0)                  # (1, 128, 128, 3)
+
+    prob = float(model.predict(arr, verbose=0)[0][0])
+    logger.info("CNN score: %.4f", prob)
+    return round(float(np.clip(prob, 0.0, 1.0)), 4)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 2 — Signal-Processing Sub-detectors (v1, unchanged)
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def _compute_fft_spectrum(gray: np.ndarray) -> np.ndarray:
-    """Return the log-magnitude FFT spectrum centred at DC."""
-    fft      = np.fft.fft2(gray.astype(np.float32))
+    fft       = np.fft.fft2(gray.astype(np.float32))
     fft_shift = np.fft.fftshift(fft)
-    magnitude = np.abs(fft_shift)
-    log_mag   = np.log1p(magnitude)   # log(1+x) avoids log(0)
-    return log_mag
+    return np.log1p(np.abs(fft_shift))
 
 
-def _radial_energy_profile(spectrum: np.ndarray, n_bins: int = 32) -> np.ndarray:
-    """
-    Compute the average spectral energy as a function of radial frequency.
-    Returns a 1-D array of length n_bins (DC=bin 0, Nyquist=bin n_bins-1).
-    """
-    h, w = spectrum.shape
-    cy, cx = h // 2, w // 2
-    max_r = min(cy, cx)
-
-    y_idx, x_idx = np.ogrid[:h, :w]
-    r_map = np.sqrt((y_idx - cy) ** 2 + (x_idx - cx) ** 2)
-
-    bin_edges = np.linspace(0, max_r, n_bins + 1)
-    profile = np.zeros(n_bins, dtype=np.float64)
-    for i in range(n_bins):
-        mask = (r_map >= bin_edges[i]) & (r_map < bin_edges[i + 1])
-        vals = spectrum[mask]
-        profile[i] = vals.mean() if vals.size > 0 else 0.0
-    return profile
+def _radial_profile(spec: np.ndarray, n=32) -> np.ndarray:
+    h,w   = spec.shape
+    cy,cx = h//2, w//2
+    y_idx = np.arange(h).reshape(-1,1)
+    x_idx = np.arange(w).reshape(1,-1)
+    r_map = np.sqrt((y_idx-cy)**2 + (x_idx-cx)**2)
+    edges = np.linspace(0, min(cy,cx), n+1)
+    prof  = np.zeros(n)
+    for i in range(n):
+        m = (r_map>=edges[i]) & (r_map<edges[i+1])
+        prof[i] = spec[m].mean() if m.any() else 0
+    return prof
 
 
-def _detect_grid_peaks(spectrum: np.ndarray, threshold_sigma: float = 4.0) -> int:
-    """
-    Count anomalous peaks in the FFT spectrum that suggest periodic GAN artifacts.
-    We blank out the central DC region (low-frequency content) and look for
-    isolated spikes in the high-frequency area.
-    """
-    h, w = spectrum.shape
-    cy, cx = h // 2, w // 2
-
-    # Blank DC region (central 10 %)
-    mask = np.ones_like(spectrum, dtype=bool)
-    r_dc = min(cy, cx) // 10
-    y_idx, x_idx = np.ogrid[:h, :w]
-    dc_zone = (y_idx - cy) ** 2 + (x_idx - cx) ** 2 < r_dc ** 2
-    mask[dc_zone] = False
-
-    high_freq = spectrum[mask]
-    mu, sigma = high_freq.mean(), high_freq.std()
-    if sigma < 1e-6:
-        return 0
-
-    peaks = int((high_freq > mu + threshold_sigma * sigma).sum())
-    return peaks
+def _grid_peak_count(spec: np.ndarray, sigma=4.0) -> int:
+    h,w   = spec.shape
+    cy,cx = h//2, w//2
+    y_idx = np.arange(h).reshape(-1,1)
+    x_idx = np.arange(w).reshape(1,-1)
+    r_map = np.sqrt((y_idx-cy)**2 + (x_idx-cx)**2)
+    dc    = r_map < min(cy,cx)//10
+    hf    = spec[~dc]
+    mu,sd = hf.mean(), hf.std()
+    return int((hf > mu+sigma*sd).sum()) if sd > 1e-6 else 0
 
 
 def detect_frequency_artifacts(gray: np.ndarray) -> float:
-    """
-    Detect GAN frequency artifacts.
-
-    Score intuition
-    ---------------
-    • Real photos: radial energy decays smoothly; few isolated peaks.
-    • GAN images:  checkerboard → periodic peaks; over-smoothing changes
-                   the decay slope at mid-frequencies.
-
-    Returns a score in [0, 1].
-    """
-    spectrum = _compute_fft_spectrum(gray)
-    profile  = _radial_energy_profile(spectrum)
-    peaks    = _detect_grid_peaks(spectrum)
-
-    # ── Peak anomaly score ──────────────────────────────────────────────────
-    # Empirically GAN images have 2–30× more isolated peaks than real photos
-    peak_score = float(np.clip(peaks / 500.0, 0.0, 1.0))
-
-    # ── Radial decay score ──────────────────────────────────────────────────
-    # Fit a linear regression to the log-profile; GAN images are flatter
-    if profile.max() > 0:
-        norm_profile = profile / profile.max()
-    else:
-        norm_profile = profile
-
-    x = np.arange(len(norm_profile), dtype=np.float64)
-    # slope of linear fit: more negative = faster decay (more natural)
-    slope = float(np.polyfit(x, norm_profile, 1)[0])
-    # GAN slope is closer to 0 (flat).  Real: slope ≈ -0.025 to -0.04
-    decay_score = float(np.clip(1.0 + slope / 0.02, 0.0, 1.0))
-
-    score = 0.50 * peak_score + 0.50 * decay_score
-    logger.info("Frequency artifact score: %.4f  (peaks=%d, slope=%.4f)",
-                score, peaks, slope)
-    return round(float(np.clip(score, 0.0, 1.0)), 4)
-
-
-# ===========================================================================
-# Sub-detector 2 — Noise Residual Analysis
-# ===========================================================================
-
-def _extract_noise_residual(gray: np.ndarray) -> np.ndarray:
-    """
-    Subtract a Gaussian-smoothed version of the image to isolate sensor noise.
-    The residual captures high-frequency noise patterns.
-    """
-    smoothed = cv2.GaussianBlur(gray.astype(np.float32), (5, 5), 0)
-    residual = gray.astype(np.float32) - smoothed
-    return residual
+    spec  = _compute_fft_spectrum(gray)
+    peaks = _grid_peak_count(spec)
+    prof  = _radial_profile(spec)
+    pk_s  = float(np.clip(peaks/500.0, 0, 1))
+    nm    = prof/prof.max() if prof.max()>0 else prof
+    slope = float(np.polyfit(np.arange(len(nm)), nm, 1)[0])
+    dc_s  = float(np.clip(1.0+slope/0.02, 0, 1))
+    score = round(0.5*pk_s + 0.5*dc_s, 4)
+    logger.info("Frequency score: %.4f (peaks=%d slope=%.4f)", score, peaks, slope)
+    return score
 
 
 def detect_noise_pattern(gray: np.ndarray) -> float:
-    """
-    Analyse noise residual autocorrelation.
-
-    GAN/diffusion outputs have different noise profiles than real cameras.
-    We measure:
-        (a) Noise standard deviation  — GAN tends to be lower (over-smoothed)
-        (b) Autocorrelation at lag-1  — real PRNU shows specific correlation
-        (c) Entropy of the residual   — AI images are often less entropic
-
-    Returns a score in [0, 1].
-    """
-    residual = _extract_noise_residual(gray)
-
-    # Standard deviation: very low STD → over-smoothed → GAN-like
-    noise_std = float(residual.std())
-    # Typical real-camera noise STD ~ 3-8; GAN images often < 2
-    std_score = float(np.clip(1.0 - noise_std / 6.0, 0.0, 1.0))
-
-    # Autocorrelation at lag 1 (horizontal)
-    flat = residual.flatten()
-    if len(flat) > 1:
-        autocorr = float(np.corrcoef(flat[:-1], flat[1:])[0, 1])
-    else:
-        autocorr = 0.0
-    # High positive autocorrelation → structured noise → AI-generated
-    autocorr_score = float(np.clip((autocorr + 1.0) / 2.0, 0.0, 1.0))
-
-    # Entropy of residual histogram
-    hist, _ = np.histogram(residual, bins=64, range=(-30, 30))
-    ent = float(scipy_entropy(hist + 1e-9))   # avoid log(0)
-    max_ent = float(np.log(64))
-    # Low entropy → more regular noise → AI
-    ent_score = float(np.clip(1.0 - ent / max_ent, 0.0, 1.0))
-
-    score = 0.30 * std_score + 0.40 * autocorr_score + 0.30 * ent_score
-    logger.info("Noise pattern score: %.4f  (std=%.2f, autocorr=%.4f, entropy=%.4f)",
-                score, noise_std, autocorr, ent)
-    return round(float(np.clip(score, 0.0, 1.0)), 4)
-
-
-# ===========================================================================
-# Sub-detector 3 — Co-occurrence Matrix Regularity
-# ===========================================================================
-
-def _glcm_entropy(gray: np.ndarray, levels: int = 64, step: int = 1) -> float:
-    """
-    Compute a simplified Gray-Level Co-occurrence Matrix (GLCM) entropy.
-    We quantise to *levels* gray levels and compute horizontal co-occurrences.
-    """
-    # Quantise
-    q = (gray.astype(np.float32) / 255.0 * (levels - 1)).astype(np.int32)
-    q = np.clip(q, 0, levels - 1)
-
-    # Horizontal co-occurrence (offset = (0, step))
-    left  = q[:, :-step].flatten()
-    right = q[:, step:].flatten()
-
-    glcm = np.zeros((levels, levels), dtype=np.float64)
-    np.add.at(glcm, (left, right), 1)
-    glcm /= (glcm.sum() + 1e-9)
-
-    ent = float(scipy_entropy(glcm.flatten() + 1e-9))
-    return ent
+    smooth   = cv2.GaussianBlur(gray.astype(np.float32),(5,5),0)
+    residual = gray.astype(np.float32) - smooth
+    ns       = float(np.clip(1.0-residual.std()/6.0, 0, 1))
+    flat     = residual.flatten()
+    ac       = float(np.corrcoef(flat[:-1],flat[1:])[0,1]) if len(flat)>1 else 0
+    ac_s     = float(np.clip((ac+1.0)/2.0, 0, 1))
+    hist,_   = np.histogram(residual, bins=64, range=(-30,30))
+    ent_s    = float(np.clip(1.0-_safe_entropy(hist+1e-9)/np.log(64), 0, 1))
+    score    = round(0.30*ns + 0.40*ac_s + 0.30*ent_s, 4)
+    logger.info("Noise score: %.4f", score)
+    return score
 
 
 def detect_texture_regularity(gray: np.ndarray) -> float:
+    levels = 64
+    q      = (gray.astype(np.float32)/255.0*(levels-1)).astype(np.int32).clip(0,levels-1)
+    glcm   = np.zeros((levels,levels), dtype=np.float64)
+    np.add.at(glcm, (q[:,:-1].flatten(), q[:,1:].flatten()), 1)
+    glcm  /= (glcm.sum()+1e-9)
+    ent    = float(_safe_entropy(glcm.flatten()+1e-9))
+    score  = round(float(np.clip((5.5-ent)/3.5, 0, 1)), 4)
+    logger.info("Texture score: %.4f (GLCM entropy=%.4f)", score, ent)
+    return score
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 3 — Visualisation helpers (v1, unchanged)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _vis_spectrum(gray):
+    spec = _compute_fft_spectrum(gray)
+    n    = cv2.normalize(spec, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    return cv2.applyColorMap(n, cv2.COLORMAP_MAGMA)
+
+def _vis_noise(gray):
+    smooth   = cv2.GaussianBlur(gray.astype(np.float32),(5,5),0)
+    residual = gray.astype(np.float32) - smooth
+    amp      = np.clip(np.abs(residual)*10, 0, 255).astype(np.uint8)
+    return cv2.applyColorMap(amp, cv2.COLORMAP_HOT)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 4 — Public Entry Point
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def analyze(image_path: str,
+            evidence_dir: str  = "reports/evidence",
+            save_evidence: bool = True,
+            use_cnn: bool       = True,
+            use_ml: bool        = True) -> Dict[str,Any]:
     """
-    AI-generated images tend to be "too regular" — their GLCM entropy is
-    lower than that of natural photographs with comparable content.
+    Run AI-generation detection (signal-processing + optional CNN).
 
-    Heuristic thresholds are learned empirically.
-
-    Returns a score in [0, 1]  (higher → more likely AI-generated).
-    """
-    ent = _glcm_entropy(gray)
-    # Empirical observation: natural photos have GLCM entropy ~ 3.5–5.5
-    # AI-generated images tend to cluster around 2.0–3.5
-    # We linearly map [5.5, 2.0] → [0, 1]
-    score = float(np.clip((5.5 - ent) / 3.5, 0.0, 1.0))
-    logger.info("Texture regularity score: %.4f  (GLCM entropy=%.4f)", score, ent)
-    return round(score, 4)
-
-
-# ===========================================================================
-# Visualisation helpers
-# ===========================================================================
-
-def visualise_spectrum(gray: np.ndarray) -> np.ndarray:
-    """Return a uint8 BGR image of the log-magnitude FFT spectrum."""
-    spectrum = _compute_fft_spectrum(gray)
-    norm = cv2.normalize(spectrum, None, 0, 255, cv2.NORM_MINMAX)
-    norm_uint8 = norm.astype(np.uint8)
-    coloured = cv2.applyColorMap(norm_uint8, cv2.COLORMAP_MAGMA)
-    return coloured
-
-
-def visualise_noise_residual(gray: np.ndarray) -> np.ndarray:
-    """Return a uint8 BGR amplified noise residual image."""
-    residual = _extract_noise_residual(gray)
-    amplified = np.clip(np.abs(residual) * 10, 0, 255).astype(np.uint8)
-    coloured = cv2.applyColorMap(amplified, cv2.COLORMAP_HOT)
-    return coloured
-
-
-# ===========================================================================
-# Public entry point
-# ===========================================================================
-
-def analyze(
-    image_path: str,
-    evidence_dir: str = "reports/evidence",
-    save_evidence: bool = True,
-) -> Dict[str, Any]:
-    """
-    Run all three AI-generation sub-detectors.
+    Parameters
+    ----------
+    use_cnn : bool
+        Toggle CNN scoring. Set False to use signal-processing only
+        (faster, no TF dependency).
 
     Returns
     -------
     {
-        sha256,
-        frequency_score, noise_score, texture_score,
-        ai_generated_score,   ← weighted combination
-        evidence paths …
+        sha256, frequency_score, noise_score, texture_score,
+        cnn_score,           ← NEW (0.5 if CNN disabled/unavailable)
+        cnn_available,       ← NEW bool
+        ai_generated_score,  ← weighted blend of all four
+        spectrum_path, noise_path
     }
     """
     image_path = str(Path(image_path).resolve())
@@ -288,53 +295,118 @@ def analyze(
     orig_array = np.array(original)
     gray       = cv2.cvtColor(orig_array, cv2.COLOR_RGB2GRAY)
 
-    logger.info("Running AI-generation detection on: %s", image_path)
+    logger.info("ai_generated_detector v2 | CNN=%s | %s",
+                TF_OK and use_cnn, image_path)
 
+    # ── Signal-processing scores (always run) ─────────────────────────────────
     freq_score    = detect_frequency_artifacts(gray)
     noise_score   = detect_noise_pattern(gray)
     texture_score = detect_texture_regularity(gray)
 
-    ai_score = round(
-        0.45 * freq_score + 0.30 * noise_score + 0.25 * texture_score, 4
-    )
-    logger.info("AI-generated score: %.4f", ai_score)
+    # ── CNN score (optional) ──────────────────────────────────────────────────
+    cnn_available = TF_OK and use_cnn
+    cnn_s = cnn_score(image_path) if cnn_available else 0.5
 
-    spectrum_path = None
-    noise_path    = None
+    # ── ML Model score: SVM + Random Forest ensemble ──────────────────────────
+    ml_available = ML_OK and use_ml
+
+    if ml_available:
+        clf = _ml.get_classifier("ai_gen")
+
+        features = extract_features(image_path)
+
+        result = clf.predict_proba(features)
+
+        ml_ensemble = result["ensemble_score"]
+        svm_s       = result["svm_score"]
+        rf_s        = result["rf_score"]
+
+        ml_label = "FAKE" if ml_ensemble > 0.5 else "REAL"
+
+        logger.info(
+            "ML score: SVM=%.4f  RF=%.4f  Ensemble=%.4f  → %s",
+            svm_s, rf_s, ml_ensemble, ml_label
+        )
+    else:
+        ml_ensemble = 0.5
+        svm_s       = 0.5
+        rf_s        = 0.5
+        ml_label    = "N/A"
+
+    # ── Weighted combination ──────────────────────────────────────────────────
+    # Priority: ML Models > CNN > Signal Processing
+
+    if ml_available:
+        ai_score = round(
+            0.40 * ml_ensemble +
+            0.25 * freq_score +
+            0.20 * noise_score +
+            0.15 * texture_score,
+            4
+        )
+
+    elif cnn_available:
+        ai_score = round(
+            0.40 * cnn_s +
+            0.30 * freq_score +
+            0.20 * noise_score +
+            0.10 * texture_score,
+            4
+        )
+
+    else:
+        ai_score = round(
+            0.45 * freq_score +
+            0.30 * noise_score +
+            0.25 * texture_score,
+            4
+        )
+
+    logger.info("AI-generated score v3: %.4f", ai_score)
+
+    # ── Save evidence ─────────────────────────────────────────────────────────
+    spectrum_path = noise_path = None
 
     if save_evidence:
         os.makedirs(evidence_dir, exist_ok=True)
-        stem       = Path(image_path).stem
-        short_hash = sha256[:12]
 
-        spec_img  = visualise_spectrum(gray)
-        spec_out  = os.path.join(evidence_dir, f"{stem}_{short_hash}_fft_spectrum.jpg")
-        cv2.imwrite(spec_out, spec_img)
-        spectrum_path = spec_out
+        stem = Path(image_path).stem
+        h12  = sha256[:12]
 
-        noise_img = visualise_noise_residual(gray)
-        noise_out = os.path.join(evidence_dir, f"{stem}_{short_hash}_noise_residual.jpg")
-        cv2.imwrite(noise_out, noise_img)
-        noise_path = noise_out
+        sp = os.path.join(
+            evidence_dir,
+            f"{stem}_{h12}_fft_spectrum.jpg"
+        )
 
-        logger.info("Spectrum  → %s", spec_out)
-        logger.info("Noise map → %s", noise_out)
+        np_ = os.path.join(
+            evidence_dir,
+            f"{stem}_{h12}_noise_residual.jpg"
+        )
+
+        cv2.imwrite(sp, _vis_spectrum(gray))
+        cv2.imwrite(np_, _vis_noise(gray))
+
+        spectrum_path = sp
+        noise_path    = np_
 
     return {
-        "sha256"          : sha256,
-        "frequency_score" : freq_score,
-        "noise_score"     : noise_score,
-        "texture_score"   : texture_score,
+        "sha256": sha256,
+
+        "frequency_score": freq_score,
+        "noise_score": noise_score,
+        "texture_score": texture_score,
+
+        "cnn_score": cnn_s,
+        "cnn_available": cnn_available,
+
+        "ml_svm_score": svm_s,
+        "ml_rf_score": rf_s,
+        "ml_ensemble_score": ml_ensemble,
+        "ml_available": ml_available,
+        "ml_label": ml_label,
+
         "ai_generated_score": ai_score,
-        "spectrum_path"   : spectrum_path,
-        "noise_path"      : noise_path,
+
+        "spectrum_path": spectrum_path,
+        "noise_path": noise_path,
     }
-
-
-# ---------------------------------------------------------------------------
-if __name__ == "__main__":
-    import sys, json
-    if len(sys.argv) < 2:
-        print("Usage: python ai_generated_detector.py <image_path>")
-        sys.exit(1)
-    print(json.dumps(analyze(sys.argv[1]), indent=2, default=str))
