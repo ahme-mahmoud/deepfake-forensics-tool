@@ -97,8 +97,7 @@ Score Fusion: `hybrid = 0.60 × ML_score + 0.40 × signal_score`
 | Dataset | Module | Link |
 |---------|--------|------|
 | **CIFAKE** | AI-Generated | kaggle.com/datasets/birdy654/cifake-real-and-ai-generated-synthetic-images |
-| **FaceForensics++** | Deepfake | github.com/ondyari/FaceForensics |
-| **Celeb-DF** | Deepfake | github.com/yuezunli/celeb-deepfakeforensics |
+| **ciplab++** | Deepfake | [github.com/ondyari/FaceForensics](https://www.kaggle.com/datasets/ciplab/real-and-fake-face-detection) |
 | **CASIA TIDE** | Splicing | forensics.idealtest.org |
 
 Place images in `data/real/` and `data/fake/` then run `python src/train_models.py`
