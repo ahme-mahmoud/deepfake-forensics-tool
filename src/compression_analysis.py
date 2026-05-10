@@ -3,25 +3,6 @@ compression_analysis.py
 =======================
 Module 1 — Error Level Analysis (ELA) & JPEG Compression Forensics
 
-PURPOSE:
-    JPEG images lose quality every time they are re-saved.  If a region of
-    an image was pasted from an *external* source and then the composite was
-    saved as JPEG, the pasted region will have a *different* compression
-    history than the background.  ELA exposes these differences as bright
-    areas in an amplified difference image.
-
-FORENSIC LOGIC:
-    1.  Re-compress the input image at a known quality level (e.g. Q=95).
-    2.  Compute the absolute pixel-wise difference between the original and
-        the re-compressed version.
-    3.  Amplify the difference (×scale) so subtle inconsistencies become
-        visible.
-    4.  Derive a scalar "manipulation score" from the ELA image statistics.
-
-CHAIN OF CUSTODY:
-    All inputs are hashed (SHA-256) before processing.  The ELA output image
-    is saved to reports/evidence/ with the source hash embedded in the
-    filename so the artefact can always be traced back to the original file.
 """
 
 import io
@@ -356,4 +337,3 @@ if __name__ == "__main__":
 
     result = analyze(sys.argv[1])
     print(json.dumps(result, indent=2, default=str))
-
