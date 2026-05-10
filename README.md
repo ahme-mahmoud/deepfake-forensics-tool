@@ -1,129 +1,406 @@
 # AI-Powered Deepfake & Image Manipulation Detection System
-## Hybrid AI + Digital Forensics Platform  
+
+## Hybrid AI + Digital Forensics 
 
 ---
 
-## Architecture
+# Overview
 
-```
+This project is a hybrid AI-powered digital image forensics framework designed to detect:
+
+* AI-generated images
+* Deepfake face manipulations
+* Image splicing and tampering
+* Compression anomalies and forensic artifacts
+
+The system combines:
+
+* classical forensic signal processing
+* machine learning ensemble classifiers
+* explainable AI (SHAP)
+* automated forensic reporting
+* evidence visualization
+* Streamlit dashboard integration
+
+The framework is designed for:
+
+* cybersecurity
+* media authenticity verification
+* forensic investigation
+* AI-generated content detection
+* digital evidence analysis
+
+---
+
+# Hybrid Forensic Architecture
+
+```text
 Input Image
     ↓
-Feature Extraction          (HOG · LBP · FFT · ELA · Color · DCT · Noise → 1983 dims)
+Feature Extraction
+(HOG · LBP · FFT · ELA · Color · DCT · Noise)
     ↓
-Signal-Processing Forensics (ELA · Splicing · AI-Gen · Deepfake heuristics)
+Compression & ELA Analysis
     ↓
-ML Classifiers              (SVM + Random Forest × 3 modules)
+AI-Generated Detection
+(GBM + ExtraTrees + SVM)
     ↓
-Score Fusion                (Signal × 40% + ML × 60% per module)
+Splicing / Tampering Detection
+(GBM + ExtraTrees + SVM)
     ↓
-SHAP Explainability         (WHY was it flagged?)
+Deepfake Detection
+(GBM + ExtraTrees + SVM)
     ↓
-Evidence Visualization      (ELA panels · Heatmaps · FFT spectrum)
+Hybrid Score Fusion
+(Signal Processing + ML)
     ↓
-Forensic Report             (JSON + TXT + PDF with chain-of-custody)
+SHAP Explainability
+    ↓
+Evidence Visualization
+    ↓
+Forensic Report
+(JSON · TXT · PDF)
     ↓
 Streamlit Dashboard
 ```
 
 ---
 
-## Project Structure
+# Current Project Structure
 
-```
+```text
 deepfake-forensics-tool/
-├── app.py                          # Master pipeline (7 steps)
-├── dashboard.py                    # Streamlit dashboard
+├── app.py
+├── dashboard.py
 ├── requirements.txt
 ├── README.md
 │
+├── models/
+│   ├── ai_gen_ensemble.pkl
+│   ├── ai_gen_scaler.pkl
+│   ├── deepfake_model_v2.pkl
+│   ├── splicing_ensemble.pkl
+│   └── splicing_scaler.pkl
+│
 ├── src/
-│   ├── feature_extractor.py        # HOG, LBP, FFT, ELA, Color, DCT, Noise
-│   ├── ml_classifier.py            # SVM + Random Forest per module
-│   ├── train_models.py             # Training pipeline + evaluation
-│   ├── shap_explainer.py           # SHAP feature importance
-│   ├── score_fusion.py             # Hybrid score combination
-│   ├── pdf_report.py               # PDF forensic report (ReportLab)
-│   │
-│   ├── compression_analysis.py     # Module 1 — ELA
-│   ├── splicing_detector.py        # Module 2 — Splicing
-│   ├── ai_generated_detector.py    # Module 3 — AI Detection
-│   ├── deepfake_detector.py        # Module 4 — Deepfake
-│   └── report_generator.py         # Module 5 — Text/JSON Report
+│   ├── ai_gen_module.py
+│   ├── splicing_module.py
+│   ├── deepfake_module.py
+│   ├── compression_analysis.py
+│   ├── feature_extractor.py
+│   ├── metadata_analyzer.py
+│   ├── score_fusion.py
+│   ├── shap_explainer.py
+│   ├── pdf_report.py
+│   ├── report_generator.py
+│   └── __init__.py
 │
 ├── tests/
 │   └── test_pipeline.py
 │
 ├── data/
-│   ├── real/    ← place real images here
-│   ├── fake/    ← place manipulated/fake images here
+│   ├── CIFAKE/
+│   ├── ciplab/
+│   ├── splicing/
 │   └── test/
 │
-└── models/      ← trained .pkl files saved here
+└── reports/
 ```
 
 ---
 
-## Quick Start
+# Core Detection Modules
+
+## 1. AI-Generated Image Detection
+
+File:
+
+```text
+src/ai_gen_module.py
+```
+
+Features:
+
+* FFT spectrum analysis
+* GAN artifact detection
+* texture fingerprints
+* noise inconsistencies
+* color distribution analysis
+
+Models:
+
+* GradientBoostingClassifier
+* ExtraTreesClassifier
+* SVM (RBF)
+
+Saved models:
+
+```text
+models/ai_gen_ensemble.pkl
+models/ai_gen_scaler.pkl
+```
+
+Training Dataset:
+
+* CIFAKE
+
+Performance:
+
+* Accuracy ≈ 91%
+* ROC-AUC ≈ 0.975
+
+---
+
+## 2. Splicing / Tampering Detection
+
+File:
+
+```text
+src/splicing_module.py
+```
+
+Features:
+
+* Error Level Analysis (ELA)
+* DCT irregularities
+* edge inconsistencies
+* lighting inconsistencies
+* copy-move artifacts
+
+Models:
+
+* GradientBoostingClassifier
+* ExtraTreesClassifier
+* SVM (RBF)
+
+Saved models:
+
+```text
+models/splicing_ensemble.pkl
+models/splicing_scaler.pkl
+```
+
+Training Dataset:
+
+* CASIA
+
+Performance:
+
+* Accuracy ≈ 79%
+* ROC-AUC ≈ 0.854
+
+---
+
+## 3. Deepfake Detection
+
+File:
+
+```text
+src/deepfake_module.py
+```
+
+Features:
+
+* HOG facial geometry
+* LBP facial texture
+* GAN blending artifacts
+* noise residual fingerprints
+* facial inconsistencies
+
+Models:
+
+* GradientBoostingClassifier
+* ExtraTreesClassifier
+* SVM (RBF)
+
+Saved model:
+
+```text
+models/deepfake_model_v2.pkl
+```
+
+Training Dataset:
+
+* ciplab / Real and Fake Face Detection
+
+---
+
+# Feature Extraction
+
+File:
+
+```text
+src/feature_extractor.py
+```
+
+Extracted forensic domains:
+
+* HOG
+* LBP
+* FFT
+* ELA
+* DCT
+* Color statistics
+* Noise analysis
+* Texture descriptors
+
+---
+
+# Explainable AI
+
+File:
+
+```text
+src/shap_explainer.py
+```
+
+The system uses SHAP explainability to:
+
+* identify dominant forensic signals
+* explain model decisions
+* visualize suspicious feature groups
+
+---
+
+# Forensic Reporting
+
+Files:
+
+```text
+src/report_generator.py
+src/pdf_report.py
+```
+
+Generated outputs:
+
+* JSON reports
+* TXT forensic summaries
+* PDF forensic evidence reports
+
+Reports include:
+
+* manipulation probability
+* confidence score
+* forensic evidence
+* module breakdown
+* chain of custody
+* SHA-256 hashing
+
+---
+
+# Streamlit Dashboard
+
+File:
+
+```text
+dashboard.py
+```
+
+Features:
+
+* image upload
+* real-time forensic analysis
+* module score visualization
+* SHAP explanation viewer
+* evidence gallery
+* PDF report download
+* JSON export
+
+Run:
 
 ```bash
-pip install -r requirements.txt
-
-# Train ML models (auto if not present)
-python src/train_models.py --samples 500
-
-# Analyse an image
-python app.py path/to/image.jpg --case-id CASE-001
-
-# Launch dashboard
 streamlit run dashboard.py
 ```
 
 ---
 
-## ML Models
+# Installation
 
-| Module | Algorithm | Features Used |
-|--------|-----------|--------------|
-| Splicing | SVM + RF | HOG, LBP, ELA, DCT, Color |
-| AI-Generated | SVM + RF | FFT, Noise, Texture, Color |
-| Deepfake | SVM + RF | HOG, LBP, Color, Noise |
-
-Score Fusion: `hybrid = 0.60 × ML_score + 0.40 × signal_score`
+```bash
+pip install -r requirements.txt
+```
 
 ---
 
-## Datasets (for real training)
+# Run Full Forensic Pipeline
 
-| Dataset | Module | Link |
-|---------|--------|------|
-| **CIFAKE** | AI-Generated | kaggle.com/datasets/birdy654/cifake-real-and-ai-generated-synthetic-images |
-| **ciplab++** | Deepfake | [github.com/ondyari/FaceForensics](https://www.kaggle.com/datasets/ciplab/real-and-fake-face-detection) |
-| **casia dataset** | Splicing | [forensics.idealtest.org](https://www.kaggle.com/datasets/sophatvathana/casia-dataset?utm_source=chatgpt.com&select=CASIA1) |
+```bash
+python app.py image.jpg
+```
 
-Place images in `data/real/` and `data/fake/` then run `python src/train_models.py`
+Example:
 
----
-
-## Feature Vector (1983 dims)
-
-| Feature | Dims | Captures |
-|---------|------|---------|
-| HOG | 1764 | Edge/gradient structure |
-| LBP | 64 | Micro-texture patterns |
-| FFT | 34 | Frequency spectrum (GAN artifacts) |
-| ELA | 5 | Compression history mismatch |
-| Color | 108 | Colour distribution anomalies |
-| DCT | 4 | JPEG block irregularities |
-| Noise | 4 | Sensor noise profile |
+```bash
+python app.py tt.jpg
+```
 
 ---
 
-## Tech Stack
+# Train Models
 
-- **Python** — core language
-- **OpenCV + scikit-image** — image processing
-- **scikit-learn** — SVM + Random Forest
-- **SHAP** — explainability
-- **ReportLab** — PDF reports
-- **Streamlit** — dashboard
+## AI-Generated Detector
+
+```bash
+python
+```
+
+```python
+from src.ai_gen_module import train
+
+train(
+    data_dir="data/CIFAKE",
+    max_per_class=3000
+)
+```
+
+---
+
+## Splicing Detector
+
+```python
+from src.splicing_module import train
+
+train(
+    data_dir="data/splicing",
+    max_per_class=3000
+)
+```
+
+---
+
+## Deepfake Detector
+
+```python
+from src.deepfake_module import train
+
+train(
+    data_root="data/ciplab"
+)
+```
+
+---
+
+# Datasets
+
+| Dataset | Module                 |
+| ------- | ---------------------- |
+| CIFAKE  | AI-generated detection |
+| CASIA   | Splicing detection     |
+| ciplab  | Deepfake detection     |
+
+---
+
+# Tech Stack
+
+* Python
+* OpenCV
+* NumPy
+* scikit-learn
+* scikit-image
+* SHAP
+* Streamlit
+* ReportLab
+* PIL
+
+---
 
