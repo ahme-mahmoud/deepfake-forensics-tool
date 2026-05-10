@@ -1,7 +1,19 @@
 """
-dashboard.py  —  Streamlit Hybrid Forensics Dashboard  v3.0
+dashboard.py  —  Streamlit Hybrid Forensics Dashboard  
 ============================================================
 Run:  streamlit run dashboard.py
+
+Report structure (from app.py v3.1):
+    report["module_scores"]      – {"ela", "ai_gen", "splicing", "deepfake"}
+    report["ml_availability"]    – {"ai_gen", "splicing", "deepfake"} booleans
+    report["module_labels"]      – per-module raw result dicts
+    report["fusion_breakdown"]   – final fusion detail dict
+    report["shap_explanations"]  – per-module SHAP dicts
+    report["final"]              – manipulation_probability, confidence,
+                                   label, dominant_module, recommendation
+    report["evidence_files"]     – list of evidence image paths
+    report["chain_of_custody"]   – sha256, timestamps
+    report["pdf_path"]           – path to generated PDF (or None)
 """
 
 import json
@@ -52,16 +64,20 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-def _col(score):
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _col(score: float) -> str:
     return "#4caf50" if score < .35 else "#ff9800" if score < .60 else "#f44336"
 
-def _badge(score, label):
+def _badge(score: float, label: str) -> str:
     cls = "badge-g" if score < .35 else "badge-y" if score < .60 else "badge-r"
     return f'<span class="badge {cls}">{label}</span>'
 
-def _card(title, score, ml_used=False):
-    ml_tag = '<span class="ml-tag">ML+Signal</span>' if ml_used else \
-             '<span style="font-size:.7rem;color:#546e7a">Signal only</span>'
+def _card(title: str, score: float, ml_used: bool = False) -> None:
+    ml_tag = (
+        '<span class="ml-tag">ML+Signal</span>' if ml_used
+        else '<span style="font-size:.7rem;color:#546e7a">Signal only</span>'
+    )
     st.markdown(f"""
     <div class="score-card">
       <h4>{title} {ml_tag}</h4>
@@ -69,64 +85,72 @@ def _card(title, score, ml_used=False):
     </div>""", unsafe_allow_html=True)
     st.progress(int(score * 100))
 
-def _load_img(path):
+def _load_img(path: str):
     if path and os.path.isfile(path):
         img = cv2.imread(path)
         if img is not None:
             return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     return None
 
+def _fmt(val, fmt=".3f") -> str:
+    """Safely format a numeric value; return 'N/A' if None or non-numeric."""
+    try:
+        return format(float(val), fmt)
+    except (TypeError, ValueError):
+        return "N/A"
+
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("## ⚙️ Settings")
-    ela_q   = st.slider("ELA Quality",    70, 99, 95)
-    ela_s   = st.slider("ELA Scale",       5, 30, 15)
-    n_train = st.slider("Auto-train samples", 100, 500, 200, 50,
-                        help="Synthetic samples per class if models missing")
+    ela_q = st.slider("ELA Quality", 70, 99, 95)
+    ela_s = st.slider("ELA Scale",    5, 30, 15)
     st.divider()
     st.markdown("### 🧠 Architecture")
     st.markdown("""
-    **Pipeline v3.0**
+    **Pipeline v3.1**
     1. Feature Extraction  
        HOG · LBP · FFT · ELA · Color · DCT · Noise
-    2. Signal-Processing Forensics  
-       ELA · Splicing · AI-Gen · Deepfake
-    3. ML Classifiers  
-       SVM + Random Forest × 3 modules
-    4. Score Fusion  
+    2. Compression / ELA Analysis
+    3. AI-Generated Detection  
+       Ensemble (GBM + ExtraTrees + SVM)
+    4. Splicing Detection  
+       Ensemble (GBM + ExtraTrees + SVM)
+    5. Deepfake Detection  
+       Ensemble classifier v2
+    6. Score Fusion  
        Hybrid weighted combination
-    5. SHAP Explainability  
+    7. SHAP Explainability  
        Feature importance per module
-    6. PDF Evidence Report
+    8. PDF Evidence Report
     """)
 
 # ── Banner ────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div class="banner">
   <h1>🔍 Hybrid AI Forensics System</h1>
-  <p>Signal Processing + ML + SHAP · Digital Forensics Platform v3.0</p>
+  <p>Signal Processing + ML Ensembles + SHAP · Digital Forensics Platform v3.1</p>
 </div>""", unsafe_allow_html=True)
 
 # ── Upload ────────────────────────────────────────────────────────────────────
 uploaded = st.file_uploader(
     "Upload an image to investigate",
-    type=["jpg","jpeg","png","bmp","webp"],
+    type=["jpg", "jpeg", "png", "bmp", "webp"],
 )
 if not uploaded:
-    c1,c2,c3 = st.columns(3)
-    c1.markdown("###  Upload\nDrop any image file above.")
-    c2.markdown("###  Analyse\nClick **Run Analysis** to start the full pipeline.")
-    c3.markdown("###  Review\nScores · SHAP · Evidence · PDF Report")
+    c1, c2, c3 = st.columns(3)
+    c1.markdown("### 1️⃣ Upload\nDrop any image file above.")
+    c2.markdown("### 2️⃣ Analyse\nClick **Run Analysis** to start the full pipeline.")
+    c3.markdown("### 3️⃣ Review\nScores · SHAP · Evidence · PDF Report")
     st.stop()
 
 # ── Preview ───────────────────────────────────────────────────────────────────
 pil_img = Image.open(uploaded)
-ci, cm  = st.columns([1,1])
+ci, cm  = st.columns([1, 1])
 with ci:
     st.image(pil_img, caption="Uploaded image", use_container_width=True)
 with cm:
-    st.markdown("###  Image Info")
+    st.markdown("### 📋 Image Info")
     st.markdown(f"- **Filename:** `{uploaded.name}`")
     st.markdown(f"- **Dimensions:** `{pil_img.width} × {pil_img.height} px`")
     st.markdown(f"- **Format:** `{pil_img.format or 'N/A'}`")
@@ -137,12 +161,12 @@ with cm:
 if not run_btn:
     st.stop()
 
-# ── Run ───────────────────────────────────────────────────────────────────────
+# ── Run pipeline ──────────────────────────────────────────────────────────────
 suffix   = Path(uploaded.name).suffix or ".jpg"
 tmp_dir  = tempfile.mkdtemp()
 img_path = os.path.join(tmp_dir, f"upload{suffix}")
-with open(img_path, "wb") as f:
-    f.write(uploaded.getvalue())
+with open(img_path, "wb") as fh:
+    fh.write(uploaded.getvalue())
 
 with st.spinner("🔍 Running hybrid forensic analysis…"):
     try:
@@ -154,175 +178,261 @@ with st.spinner("🔍 Running hybrid forensic analysis…"):
             evidence_dir    = os.path.join(tmp_dir, "evidence"),
             save_evidence   = True,
             case_id         = f"DASH-{Path(uploaded.name).stem[:10].upper()}",
-            investigator_id = "streamlit-v3",
+            investigator_id = "streamlit-v3.1",
         )
     except Exception as exc:
-        st.error(f" Analysis failed: {exc}")
+        st.error(f"❌ Analysis failed: {exc}")
         st.exception(exc)
         st.stop()
 
-st.success(f"Analysis complete in {report.get('elapsed_seconds','?')}s")
+st.success(f"✅ Analysis complete in {report.get('elapsed_seconds', '?')}s")
 st.divider()
 
-# ── Scores ────────────────────────────────────────────────────────────────────
-st.markdown("##  Module Scores")
-mods   = report.get("modules", {})
-ml_s   = report.get("ml_scores", {})
+# ── Unpack new report structure ───────────────────────────────────────────────
+# Scores: report["module_scores"] = {"ela", "ai_gen", "splicing", "deepfake"}
+mod_scores  = report.get("module_scores", {})
+s_ela       = float(mod_scores.get("ela",      0))
+s_ai        = float(mod_scores.get("ai_gen",   0))
+s_spl       = float(mod_scores.get("splicing", 0))
+s_dfk       = float(mod_scores.get("deepfake", 0))
 
-s_ela  = mods.get("compression_ela",       {}).get("score", 0)
-s_spl  = mods.get("splicing_detection",    {}).get("score", 0)
-s_ai   = mods.get("ai_generated_detection",{}).get("score", 0)
-s_dfk  = mods.get("deepfake_detection",    {}).get("score", 0)
-s_fin  = report.get("final",{}).get("manipulation_probability", 0)
-label  = report.get("final",{}).get("label","UNKNOWN")
-conf   = report.get("final",{}).get("confidence","N/A")
+# ML availability: report["ml_availability"] = {"ai_gen": bool, "splicing": bool, "deepfake": bool}
+ml_avail    = report.get("ml_availability", {})
+ml_ai       = bool(ml_avail.get("ai_gen",   False))
+ml_spl      = bool(ml_avail.get("splicing", False))
+ml_dfk      = bool(ml_avail.get("deepfake", False))
 
-c1,c2,c3,c4 = st.columns(4)
+# Per-module raw result dicts (from each module's predict() output, enriched by pipeline)
+mod_labels  = report.get("module_labels", {})
+ela_det     = mod_labels.get("ela",      {})
+ai_det      = mod_labels.get("ai_gen",   {})
+spl_det     = mod_labels.get("splicing", {})
+dfk_det     = mod_labels.get("deepfake", {})
+
+# Final verdict
+final       = report.get("final", {})
+s_fin       = float(final.get("manipulation_probability", 0))
+label       = final.get("label",          "UNKNOWN")
+conf        = final.get("confidence",     "N/A")
+rec         = final.get("recommendation", "")
+dom_mod     = final.get("dominant_module", "N/A")
+
+# Fusion breakdown
+fusion      = report.get("fusion_breakdown", {})
+
+# ── Module Score Cards ────────────────────────────────────────────────────────
+st.markdown("## 📊 Module Scores")
+c1, c2, c3, c4 = st.columns(4)
 with c1: _card("🗜️ Compression/ELA", s_ela, False)
-with c2: _card("✂️ Splicing",        s_spl, ml_s.get("splicing",{}).get("trained",False))
-with c3: _card("🤖 AI-Generation",   s_ai,  ml_s.get("ai_gen",  {}).get("trained",False))
-with c4: _card("👤 Deepfake",        s_dfk, ml_s.get("deepfake",{}).get("trained",False))
-
+with c2: _card("✂️ Splicing",        s_spl, ml_spl)
+with c3: _card("🤖 AI-Generation",   s_ai,  ml_ai)
+with c4: _card("👤 Deepfake",        s_dfk, ml_dfk)
 st.divider()
 
-# ── Verdict ───────────────────────────────────────────────────────────────────
+# ── Final Verdict ─────────────────────────────────────────────────────────────
 st.markdown("## 🏛️ Final Verdict")
-vc, rc = st.columns([1,2])
+vc, rc = st.columns([1, 2])
 with vc:
-    _card("MANIPULATION PROBABILITY", s_fin,
-          any(v.get("trained") for v in ml_s.values()))
+    _card("MANIPULATION PROBABILITY", s_fin, any([ml_ai, ml_spl, ml_dfk]))
     st.markdown(_badge(s_fin, label), unsafe_allow_html=True)
-    st.caption(f"Confidence: **{conf.upper()}**")
+    st.caption(f"Confidence: **{conf.upper() if conf else 'N/A'}**")
 with rc:
-    rec = report.get("final",{}).get("recommendation","")
-    st.info(rec)
-    fusion = report.get("fusion_breakdown", {})
+    if rec:
+        st.info(rec)
     if fusion:
-        st.caption(f"Dominant module: **{fusion.get('dominant_module','N/A')}** "
-                   f"| Modules above 50%: **{fusion.get('modules_above_50pct',0)}/4**")
-
+        above_50 = sum(
+            1 for v in mod_scores.values() if float(v) >= 0.50
+        )
+        st.caption(
+            f"Dominant module: **{dom_mod}** "
+            f"| Modules above 50%: **{above_50}/4**"
+        )
 st.divider()
 
-# ── Detailed tabs ─────────────────────────────────────────────────────────────
+# ── Detailed Tabs ─────────────────────────────────────────────────────────────
 st.markdown("## 🔬 Detailed Analysis")
-tabs = st.tabs(["🗜️ ELA", "✂️ Splicing", "🤖 AI-Gen", "👤 Deepfake", "🧠 SHAP", "📥 Report"])
+tabs = st.tabs(["🗜️ ELA", "✂️ Splicing", "🤖 AI-Gen", "👤 Deepfake",
+                "🧠 SHAP", "📥 Report"])
 
+# ── Tab 0: ELA ────────────────────────────────────────────────────────────────
 with tabs[0]:
-    ela_m = mods.get("compression_ela",{})
-    st.metric("ELA Score", f"{ela_m.get('score',0):.4f}")
-    st.caption(ela_m.get("interpretation",""))
-    st.metric("Suspicious Regions", ela_m.get("suspicious_regions",0))
+    st.metric("ELA Score", f"{s_ela:.4f}")
+    st.caption(ela_det.get("interpretation", ""))
 
+    sub_cols = st.columns(2)
+    sub_cols[0].metric("Suspicious Regions",
+                        ela_det.get("suspicious_regions", "N/A"))
+    sub_cols[1].metric("SHA-256 (truncated)",
+                        str(ela_det.get("sha256", "N/A"))[:16] + "…"
+                        if ela_det.get("sha256") else "N/A")
+
+# ── Tab 1: Splicing ───────────────────────────────────────────────────────────
 with tabs[1]:
-    spl_m = mods.get("splicing_detection",{})
-    st.metric("Splicing Score", f"{spl_m.get('score',0):.4f}")
-    c1,c2,c3 = st.columns(3)
-    c1.metric("Edge",      f"{spl_m.get('edge_score',0):.3f}")
-    c2.metric("Lighting",  f"{spl_m.get('lighting_score',0):.3f}")
-    c3.metric("Copy-Move", f"{spl_m.get('copy_move_score',0):.3f}")
-    if ml_s.get("splicing",{}).get("trained"):
-        c4,c5 = st.columns(2)
-        c4.metric("RF Score",  f"{ml_s['splicing'].get('rf_score',0):.3f}")
-        c5.metric("SVM Score", f"{ml_s['splicing'].get('svm_score',0):.3f}")
-    st.caption(spl_m.get("interpretation",""))
+    st.metric("Splicing Score", f"{s_spl:.4f}")
 
+    # Signal sub-scores from splicing_module.predict()
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Edge Inconsistency",  _fmt(spl_det.get("edge_score")))
+    c2.metric("Lighting Mismatch",   _fmt(spl_det.get("lighting_score")))
+    c3.metric("Copy-Move",           _fmt(spl_det.get("copy_move_score")))
+
+    # ML vs signal breakdown
+    c4, c5 = st.columns(2)
+    c4.metric("ML Score",     _fmt(spl_det.get("ml_score")))
+    c5.metric("Signal Score", _fmt(spl_det.get("signal_score")))
+
+    if ml_spl:
+        st.markdown(
+            '<span class="ml-tag">Ensemble ML active</span>',
+            unsafe_allow_html=True,
+        )
+    label_spl = "SPLICED ⚠️" if spl_det.get("is_spliced") else "Intact ✅"
+    st.markdown(f"**Detection label:** {label_spl}")
+    st.caption(spl_det.get("interpretation", ""))
+
+# ── Tab 2: AI-Gen ─────────────────────────────────────────────────────────────
 with tabs[2]:
-    ai_m = mods.get("ai_generated_detection",{})
-    st.metric("AI-Gen Score", f"{ai_m.get('score',0):.4f}")
-    c1,c2,c3 = st.columns(3)
-    c1.metric("Frequency",   f"{ai_m.get('frequency_score',0):.3f}")
-    c2.metric("Noise",       f"{ai_m.get('noise_score',0):.3f}")
-    c3.metric("Texture",     f"{ai_m.get('texture_score',0):.3f}")
-    if ml_s.get("ai_gen",{}).get("trained"):
-        c4,c5 = st.columns(2)
-        c4.metric("RF Score",  f"{ml_s['ai_gen'].get('rf_score',0):.3f}")
-        c5.metric("SVM Score", f"{ml_s['ai_gen'].get('svm_score',0):.3f}")
-    st.caption(ai_m.get("interpretation",""))
+    st.metric("AI-Gen Score", f"{s_ai:.4f}")
 
+    # Signal sub-scores from ai_gen_module.predict()
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Frequency Anomaly", _fmt(ai_det.get("frequency_score")))
+    c2.metric("Noise Fingerprint",  _fmt(ai_det.get("noise_score")))
+    c3.metric("Texture Pattern",    _fmt(ai_det.get("texture_score")))
+
+    # ML vs signal breakdown
+    c4, c5 = st.columns(2)
+    c4.metric("ML Score",     _fmt(ai_det.get("ml_score")))
+    c5.metric("Signal Score", _fmt(ai_det.get("signal_score")))
+
+    if ml_ai:
+        st.markdown(
+            '<span class="ml-tag">Ensemble ML active</span>',
+            unsafe_allow_html=True,
+        )
+    label_ai = "AI-GENERATED ⚠️" if ai_det.get("is_ai_generated") else "Authentic ✅"
+    st.markdown(f"**Detection label:** {label_ai}")
+    st.caption(ai_det.get("interpretation", ""))
+
+# ── Tab 3: Deepfake ───────────────────────────────────────────────────────────
 with tabs[3]:
-    dfk_m = mods.get("deepfake_detection",{})
-    st.metric("Deepfake Score", f"{dfk_m.get('score',0):.4f}")
-    c1,c2,c3,c4 = st.columns(4)
-    c1.metric("Faces",    dfk_m.get("faces_detected",0))
-    c2.metric("Landmark", f"{dfk_m.get('landmark_score',0):.3f}")
-    c3.metric("Blending", f"{dfk_m.get('blending_score',0):.3f}")
-    c4.metric("Colour",   f"{dfk_m.get('colour_score',0):.3f}")
-    if ml_s.get("deepfake",{}).get("trained"):
-        c5,c6 = st.columns(2)
-        c5.metric("RF Score",  f"{ml_s['deepfake'].get('rf_score',0):.3f}")
-        c6.metric("SVM Score", f"{ml_s['deepfake'].get('svm_score',0):.3f}")
-    st.caption(dfk_m.get("interpretation",""))
+    st.metric("Deepfake Score", f"{s_dfk:.4f}")
 
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Faces Detected",  dfk_det.get("faces_detected", "N/A"))
+    c2.metric("Landmark Score",  _fmt(dfk_det.get("landmark_score")))
+    c3.metric("Blending Score",  _fmt(dfk_det.get("blending_score")))
+    c4.metric("Colour Score",    _fmt(dfk_det.get("colour_score")))
+
+    # ML vs signal breakdown
+    c5, c6 = st.columns(2)
+    c5.metric("ML Score",     _fmt(dfk_det.get("ml_score")))
+    c6.metric("Signal Score", _fmt(dfk_det.get("signal_score")))
+
+    if ml_dfk:
+        st.markdown(
+            '<span class="ml-tag">Ensemble ML active</span>',
+            unsafe_allow_html=True,
+        )
+    dfk_label = dfk_det.get("label", "UNKNOWN")
+    dfk_conf  = dfk_det.get("confidence", "")
+    st.markdown(f"**Detection label:** {dfk_label}"
+                + (f" — confidence: {dfk_conf}" if dfk_conf else ""))
+    st.caption(dfk_det.get("interpretation", ""))
+
+# ── Tab 4: SHAP ───────────────────────────────────────────────────────────────
 with tabs[4]:
-    shap_data = report.get("shap_explanations",{})
+    shap_data = report.get("shap_explanations", {})
     if not shap_data:
-        st.info("SHAP explanations unavailable (models not trained yet).")
+        st.info("SHAP explanations unavailable — feature vector could not be extracted.")
     else:
         for mod, exp in shap_data.items():
             if not exp.get("available"):
-                st.warning(f"SHAP unavailable for {mod}: {exp.get('summary','')}")
+                st.warning(f"SHAP unavailable for **{mod}**: {exp.get('summary', '')}")
                 continue
-            st.markdown(f"### {mod.upper()} — {exp.get('dominant_domain','')}")
-            st.success(exp.get("summary",""))
-            top = exp.get("top_features",[])[:8]
+            st.markdown(f"### {mod.upper()} — {exp.get('dominant_domain', '')}")
+            st.success(exp.get("summary", ""))
+            top = exp.get("top_features", [])[:8]
             if top:
                 import pandas as pd
                 df = pd.DataFrame([{
-                    "Group"      : f["feature_group"],
-                    "SHAP"       : f"{f['shap_value']:+.4f}",
-                    "Direction"  : f["direction"],
-                    "Description": f["description"],
-                } for f in top])
+                    "Group"      : feat["feature_group"],
+                    "SHAP"       : f"{feat['shap_value']:+.4f}",
+                    "Direction"  : feat["direction"],
+                    "Description": feat["description"],
+                } for feat in top])
                 st.dataframe(df, use_container_width=True, hide_index=True)
             st.divider()
 
+# ── Tab 5: Report & Downloads ─────────────────────────────────────────────────
 with tabs[5]:
     # Evidence gallery
-    ev = report.get("evidence_files",[])
+    ev = report.get("evidence_files", [])
     if ev:
-        st.markdown("### Evidence Images")
+        st.markdown("### 🗂️ Evidence Images")
         valid = [p for p in ev if _load_img(p) is not None]
         if valid:
             cols = st.columns(min(len(valid), 3))
             for i, path in enumerate(valid[:6]):
                 img = _load_img(path)
                 if img is not None:
-                    cols[i % 3].image(img, caption=Path(path).stem.split("_")[-1],
-                                       use_container_width=True)
+                    cols[i % 3].image(
+                        img,
+                        caption=Path(path).stem.split("_")[-1],
+                        use_container_width=True,
+                    )
+        else:
+            st.info("No renderable evidence images found.")
+    else:
+        st.info("No evidence images were saved for this run.")
 
-    # SHA-256
+    # Chain of custody
     st.divider()
-    coc = report.get("chain_of_custody",{})
-    st.markdown("###  Chain of Custody")
-    st.code(f"SHA-256: {coc.get('sha256','N/A')}")
-    st.markdown(f"Case ID: `{report.get('case_id','N/A')}` | "
-                f"Generated: `{report.get('generated_at','N/A')}`")
+    coc = report.get("chain_of_custody", {})
+    st.markdown("### 🔐 Chain of Custody")
+    st.code(f"SHA-256: {coc.get('sha256', 'N/A')}")
+    st.markdown(
+        f"Case ID: `{report.get('case_id', 'N/A')}` | "
+        f"Generated: `{report.get('generated_at', 'N/A')}`"
+    )
+
+    # Fusion detail
+    if fusion:
+        st.divider()
+        st.markdown("### ⚖️ Score Fusion Breakdown")
+        fb_cols = st.columns(4)
+        for col, (key, label_) in zip(
+            fb_cols,
+            [("ela", "ELA"), ("ai_gen", "AI-Gen"),
+             ("splicing", "Splicing"), ("deepfake", "Deepfake")],
+        ):
+            col.metric(label_, _fmt(mod_scores.get(key, 0)))
 
     # Downloads
     st.divider()
-    st.markdown("### Downloads")
+    st.markdown("### 📥 Downloads")
     dc1, dc2 = st.columns(2)
     with dc1:
         st.download_button(
-            " JSON Report",
+            "⬇️ JSON Report",
             json.dumps(report, indent=2, default=str),
-            file_name=f"forensic_{report.get('case_id','report')}.json",
+            file_name=f"forensic_{report.get('case_id', 'report')}.json",
             mime="application/json",
             use_container_width=True,
         )
     with dc2:
         pdf = report.get("pdf_path")
         if pdf and os.path.isfile(pdf):
-            with open(pdf,"rb") as f:
+            with open(pdf, "rb") as fh:
                 st.download_button(
-                    " PDF Report",
-                    f.read(),
-                    file_name=f"forensic_{report.get('case_id','report')}.pdf",
+                    "⬇️ PDF Report",
+                    fh.read(),
+                    file_name=f"forensic_{report.get('case_id', 'report')}.pdf",
                     mime="application/pdf",
                     use_container_width=True,
                 )
         else:
-            st.info("PDF generation requires reportlab")
+            st.info("PDF generation requires reportlab — install it to enable PDF export.")
 
-    with st.expander(" Raw JSON"):
+    with st.expander("📄 Raw JSON"):
         st.json(report)
