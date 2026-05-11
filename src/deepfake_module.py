@@ -331,10 +331,15 @@ def train(
 # ─────────────────────────────────────────────────────────────────────────────
 
 _model_cache: Pipeline | None = None
-_MODEL_PATH = "deepfake_model_v2.pkl"
+_MODEL_PATH = Path(__file__).parent.parent / "models" / "deepfake_model_v2.pkl"
 
 
-def predict(image_path: str, threshold: float = 0.50) -> Dict[str, Any]:
+def predict(
+    image_path: str,
+    evidence_dir=None,
+    save_evidence: bool = True,
+    threshold: float = 0.50,
+) -> Dict[str, Any]:
     """
     Predict whether an image is a deepfake.
 
@@ -348,7 +353,7 @@ def predict(image_path: str, threshold: float = 0.50) -> Dict[str, Any]:
 
     # Load model once
     if _model_cache is None:
-        if not os.path.exists(_MODEL_PATH):
+        if not _MODEL_PATH.exists():
             raise FileNotFoundError(
                 f"Model not found at '{_MODEL_PATH}'. Run train() first."
             )
