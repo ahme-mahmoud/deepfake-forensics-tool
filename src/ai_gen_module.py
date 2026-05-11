@@ -46,7 +46,7 @@ from sklearn.pipeline import Pipeline
 
 logger = logging.getLogger("ai_gen_module")
 
-_ROOT      = Path(__file__).parent.parent.parent
+_ROOT      = Path(__file__).parent.parent
 MODELS_DIR = _ROOT / "models"
 
 # ── Feature config ─────────────────────────────────────────────────────────────
@@ -636,7 +636,12 @@ def _load_models() -> bool:
         return False
 
 
-def predict(image_path: str) -> Dict[str, Any]:
+def predict(
+    image_path: str,
+    evidence_dir=None,
+    save_evidence: bool = True,
+    threshold: float = DECISION_THRESHOLD,
+) -> Dict[str, Any]:
     """
     Predict P(AI-generated) for a single image.
 
@@ -666,7 +671,7 @@ def predict(image_path: str) -> Dict[str, Any]:
             "is_ai_generated": False,
             "ml_score": 0.5, "signal_score": 0.5,
             "ml_available": False, "confidence": 0.0,
-            "threshold": DECISION_THRESHOLD,
+            "threshold": threshold,
             "features_used": "error",
         }
 
@@ -676,12 +681,12 @@ def predict(image_path: str) -> Dict[str, Any]:
         logger.warning("Models not trained — signal score only")
         return {
             "probability_ai_generated": round(signal_score, 4),
-            "is_ai_generated": signal_score >= DECISION_THRESHOLD,
+            "is_ai_generated": signal_score >= threshold,
             "ml_score": signal_score,
             "signal_score": round(signal_score, 4),
             "ml_available": False,
             "confidence": round(abs(signal_score - 0.5) * 2, 4),
-            "threshold": DECISION_THRESHOLD,
+            "threshold": threshold,
             "features_used": "signal_only",
         }
 
@@ -696,17 +701,17 @@ def predict(image_path: str) -> Dict[str, Any]:
 
     logger.info(
         "AI-Gen predict: ML=%.4f  signal=%.4f  →  %.4f  (thr=%.2f)",
-        ml_prob, signal_score, combined, DECISION_THRESHOLD,
+        ml_prob, signal_score, combined, threshold,
     )
 
     return {
         "probability_ai_generated": combined,
-        "is_ai_generated"         : combined >= DECISION_THRESHOLD,
+        "is_ai_generated"         : combined >= threshold,
         "ml_score"                : round(ml_prob,      4),
         "signal_score"            : round(signal_score, 4),
         "ml_available"            : True,
         "confidence"              : round(abs(combined - 0.5) * 2, 4),
-        "threshold"               : DECISION_THRESHOLD,
+        "threshold"               : threshold,
         "features_used"           : "ml+signal",
     }
 
