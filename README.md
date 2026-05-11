@@ -17,7 +17,6 @@ The system combines:
 
 * classical forensic signal processing
 * machine learning ensemble classifiers
-* explainable AI (SHAP)
 * automated forensic reporting
 * evidence visualization
 * Streamlit dashboard integration
@@ -49,12 +48,10 @@ Splicing / Tampering Detection
 (GBM + ExtraTrees + SVM)
     ↓
 Deepfake Detection
-(GBM + ExtraTrees + SVM)
+(Custom Ensemble Classifier)
     ↓
 Hybrid Score Fusion
 (Signal Processing + ML)
-    ↓
-SHAP Explainability
     ↓
 Evidence Visualization
     ↓
@@ -209,9 +206,7 @@ Features:
 
 Models:
 
-* GradientBoostingClassifier
-* ExtraTreesClassifier
-* SVM (RBF)
+* Custom Ensemble Classifier
 
 Saved model:
 
@@ -246,7 +241,7 @@ Extracted forensic domains:
 
 ---
 
-# Explainable AI
+# Optional Explainability Layer
 
 File:
 
@@ -254,11 +249,7 @@ File:
 src/shap_explainer.py
 ```
 
-The system uses SHAP explainability to:
-
-* identify dominant forensic signals
-* explain model decisions
-* visualize suspicious feature groups
+Optional SHAP explainability support is included for future forensic interpretation and feature attribution enhancements.
 
 ---
 
@@ -301,10 +292,10 @@ Features:
 * image upload
 * real-time forensic analysis
 * module score visualization
-* SHAP explanation viewer
 * evidence gallery
 * PDF report download
 * JSON export
+* hybrid forensic verdict system
 
 Run:
 
@@ -339,10 +330,6 @@ python app.py tt.jpg
 # Train Models
 
 ## AI-Generated Detector
-
-```bash
-python
-```
 
 ```python
 from src.ai_gen_module import train
@@ -397,10 +384,23 @@ train(
 * NumPy
 * scikit-learn
 * scikit-image
-* SHAP
 * Streamlit
 * ReportLab
 * PIL
+
+---
+
+# System Capabilities
+
+The platform provides:
+
+* Hybrid AI + signal-processing forensic analysis
+* Automated manipulation probability estimation
+* Real-time forensic dashboard visualization
+* Multi-module ensemble detection
+* Evidence-oriented forensic reporting
+* Digital media authenticity assessment
+* Modular and extensible architecture for future forensic modules
 
 ---
 
