@@ -1,3 +1,16 @@
+![Python](https://img.shields.io/badge/Python-3.13-blue)
+![Streamlit](https://img.shields.io/badge/Streamlit-Dashboard-red)
+![OpenCV](https://img.shields.io/badge/OpenCV-Computer%20Vision-green)
+![scikit--learn](https://img.shields.io/badge/scikit--learn-ML-orange)
+![SHAP](https://img.shields.io/badge/SHAP-Explainability-purple)
+![Status](https://img.shields.io/badge/Status-Active-success)
+![Forensics](https://img.shields.io/badge/Digital-Forensics-darkblue)
+![Deepfake](https://img.shields.io/badge/AI-Deepfake%20Detection-red)
+![ELA](https://img.shields.io/badge/ELA-Image%20Forensics-yellow)
+![Fusion](https://img.shields.io/badge/Hybrid-Score%20Fusion-blueviolet)
+![Reports](https://img.shields.io/badge/Reports-PDF%20%7C%20JSON%20%7C%20TXT-lightgrey)
+![License](https://img.shields.io/badge/License-Academic-informational)
+
 # AI-Powered Deepfake & Image Manipulation Detection System
 
 ## Hybrid AI + Digital Forensics 
