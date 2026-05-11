@@ -1,14 +1,15 @@
 """
-dashboard.py  —  Streamlit Hybrid Forensics Dashboard  
+dashboard.py  —  Streamlit Hybrid Forensics Dashboard  v4.0
 ============================================================
 Run:  streamlit run dashboard.py
 
-Report structure (from app.py v3.1):
+Report structure (from app.py v4.0 / report_generator v3.0):
     report["module_scores"]      – {"ela", "ai_gen", "splicing", "deepfake"}
-    report["ml_availability"]    – {"ai_gen", "splicing", "deepfake"} booleans
-    report["module_labels"]      – per-module raw result dicts
-    report["fusion_breakdown"]   – final fusion detail dict
-    report["shap_explanations"]  – per-module SHAP dicts
+    report["module_labels"]      – {"ela": "LIKELY AUTHENTIC", ...}  (strings)
+    report["module_details"]     – per-module rich detail dicts
+    report["ml_availability"]    – {"ela", "ai_gen", "splicing", "deepfake"} booleans
+    report["fusion_breakdown"]   – {module: weighted_contribution}
+    report["shap_explanations"]  – always {} (SHAP disabled)
     report["final"]              – manipulation_probability, confidence,
                                    label, dominant_module, recommendation
     report["evidence_files"]     – list of evidence image paths
@@ -108,7 +109,7 @@ with st.sidebar:
     st.divider()
     st.markdown("### 🧠 Architecture")
     st.markdown("""
-    **Pipeline v3.1**
+    **Pipeline v4.0**
     1. Feature Extraction  
        HOG · LBP · FFT · ELA · Color · DCT · Noise
     2. Compression / ELA Analysis
@@ -120,16 +121,14 @@ with st.sidebar:
        Ensemble classifier v2
     6. Score Fusion  
        Hybrid weighted combination
-    7. SHAP Explainability  
-       Feature importance per module
-    8. PDF Evidence Report
+    7. PDF Evidence Report
     """)
 
 # ── Banner ────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div class="banner">
   <h1>🔍 Hybrid AI Forensics System</h1>
-  <p>Signal Processing + ML Ensembles + SHAP · Digital Forensics Platform v3.1</p>
+  <p>Signal Processing + ML Ensembles · Digital Forensics Platform v4.0</p>
 </div>""", unsafe_allow_html=True)
 
 # ── Upload ────────────────────────────────────────────────────────────────────
@@ -141,7 +140,7 @@ if not uploaded:
     c1, c2, c3 = st.columns(3)
     c1.markdown("### 1️⃣ Upload\nDrop any image file above.")
     c2.markdown("### 2️⃣ Analyse\nClick **Run Analysis** to start the full pipeline.")
-    c3.markdown("### 3️⃣ Review\nScores · SHAP · Evidence · PDF Report")
+    c3.markdown("### 3️⃣ Review\nScores · Evidence · PDF Report")
     st.stop()
 
 # ── Preview ───────────────────────────────────────────────────────────────────
@@ -178,7 +177,7 @@ with st.spinner("🔍 Running hybrid forensic analysis…"):
             evidence_dir    = os.path.join(tmp_dir, "evidence"),
             save_evidence   = True,
             case_id         = f"DASH-{Path(uploaded.name).stem[:10].upper()}",
-            investigator_id = "streamlit-v3.1",
+            investigator_id = "streamlit-v4.0",
         )
     except Exception as exc:
         st.error(f"❌ Analysis failed: {exc}")
@@ -189,36 +188,38 @@ st.success(f"✅ Analysis complete in {report.get('elapsed_seconds', '?')}s")
 st.divider()
 
 # ── Unpack new report structure ───────────────────────────────────────────────
-# Scores: report["module_scores"] = {"ela", "ai_gen", "splicing", "deepfake"}
-mod_scores  = report.get("module_scores", {})
-s_ela       = float(mod_scores.get("ela",      0))
-s_ai        = float(mod_scores.get("ai_gen",   0))
-s_spl       = float(mod_scores.get("splicing", 0))
-s_dfk       = float(mod_scores.get("deepfake", 0))
 
-# ML availability: report["ml_availability"] = {"ai_gen": bool, "splicing": bool, "deepfake": bool}
-ml_avail    = report.get("ml_availability", {})
-ml_ai       = bool(ml_avail.get("ai_gen",   False))
-ml_spl      = bool(ml_avail.get("splicing", False))
-ml_dfk      = bool(ml_avail.get("deepfake", False))
+# Flat module scores  {"ela": 0.3, "splicing": 0.6, ...}
+mod_scores = report.get("module_scores", {})
+s_ela      = float(mod_scores.get("ela",      0))
+s_ai       = float(mod_scores.get("ai_gen",   0))
+s_spl      = float(mod_scores.get("splicing", 0))
+s_dfk      = float(mod_scores.get("deepfake", 0))
 
-# Per-module raw result dicts (from each module's predict() output, enriched by pipeline)
-mod_labels  = report.get("module_labels", {})
-ela_det     = mod_labels.get("ela",      {})
-ai_det      = mod_labels.get("ai_gen",   {})
-spl_det     = mod_labels.get("splicing", {})
-dfk_det     = mod_labels.get("deepfake", {})
+# ML availability  {"ela": False, "splicing": True, ...}
+ml_avail = report.get("ml_availability", {})
+ml_ai    = bool(ml_avail.get("ai_gen",   False))
+ml_spl   = bool(ml_avail.get("splicing", False))
+ml_dfk   = bool(ml_avail.get("deepfake", False))
+
+# module_labels is a dict of STRINGS — e.g. {"ela": "LIKELY AUTHENTIC"}
+# Per-module rich detail dicts live in module_details
+mod_details = report.get("module_details", {})
+ela_det     = mod_details.get("compression_ela",        {})
+spl_det     = mod_details.get("splicing_detection",     {})
+ai_det      = mod_details.get("ai_generated_detection", {})
+dfk_det     = mod_details.get("deepfake_detection",     {})
 
 # Final verdict
-final       = report.get("final", {})
-s_fin       = float(final.get("manipulation_probability", 0))
-label       = final.get("label",          "UNKNOWN")
-conf        = final.get("confidence",     "N/A")
-rec         = final.get("recommendation", "")
-dom_mod     = final.get("dominant_module", "N/A")
+final   = report.get("final", {})
+s_fin   = float(final.get("manipulation_probability", 0))
+label   = final.get("label",          "UNKNOWN")
+conf    = final.get("confidence",     "N/A")
+rec     = final.get("recommendation", "")
+dom_mod = final.get("dominant_module", "N/A")
 
-# Fusion breakdown
-fusion      = report.get("fusion_breakdown", {})
+# Fusion breakdown  {"ela": 0.06, "splicing": 0.15, ...}
+fusion = report.get("fusion_breakdown", {})
 
 # ── Module Score Cards ────────────────────────────────────────────────────────
 st.markdown("## 📊 Module Scores")
@@ -240,9 +241,7 @@ with rc:
     if rec:
         st.info(rec)
     if fusion:
-        above_50 = sum(
-            1 for v in mod_scores.values() if float(v) >= 0.50
-        )
+        above_50 = sum(1 for v in mod_scores.values() if float(v) >= 0.50)
         st.caption(
             f"Dominant module: **{dom_mod}** "
             f"| Modules above 50%: **{above_50}/4**"
@@ -252,7 +251,7 @@ st.divider()
 # ── Detailed Tabs ─────────────────────────────────────────────────────────────
 st.markdown("## 🔬 Detailed Analysis")
 tabs = st.tabs(["🗜️ ELA", "✂️ Splicing", "🤖 AI-Gen", "👤 Deepfake",
-                "🧠 SHAP", "📥 Report"])
+                "🧠 Explainability", "📥 Report"])
 
 # ── Tab 0: ELA ────────────────────────────────────────────────────────────────
 with tabs[0]:
@@ -262,15 +261,16 @@ with tabs[0]:
     sub_cols = st.columns(2)
     sub_cols[0].metric("Suspicious Regions",
                         ela_det.get("suspicious_regions", "N/A"))
+    # sha256 lives in chain_of_custody, not module_details
+    coc_sha = report.get("chain_of_custody", {}).get("sha256", "N/A")
     sub_cols[1].metric("SHA-256 (truncated)",
-                        str(ela_det.get("sha256", "N/A"))[:16] + "…"
-                        if ela_det.get("sha256") else "N/A")
+                        str(coc_sha)[:16] + "…" if coc_sha != "N/A" else "N/A")
 
 # ── Tab 1: Splicing ───────────────────────────────────────────────────────────
 with tabs[1]:
     st.metric("Splicing Score", f"{s_spl:.4f}")
 
-    # Signal sub-scores from splicing_module.predict()
+    # Signal sub-scores from splicing_module.predict() — surfaced via module_details
     c1, c2, c3 = st.columns(3)
     c1.metric("Edge Inconsistency",  _fmt(spl_det.get("edge_score")))
     c2.metric("Lighting Mismatch",   _fmt(spl_det.get("lighting_score")))
@@ -294,7 +294,7 @@ with tabs[1]:
 with tabs[2]:
     st.metric("AI-Gen Score", f"{s_ai:.4f}")
 
-    # Signal sub-scores from ai_gen_module.predict()
+    # Signal sub-scores from ai_gen_module.predict() — surfaced via module_details
     c1, c2, c3 = st.columns(3)
     c1.metric("Frequency Anomaly", _fmt(ai_det.get("frequency_score")))
     c2.metric("Noise Fingerprint",  _fmt(ai_det.get("noise_score")))
@@ -310,7 +310,7 @@ with tabs[2]:
             '<span class="ml-tag">Ensemble ML active</span>',
             unsafe_allow_html=True,
         )
-    label_ai = "AI-GENERATED ⚠️" if ai_det.get("is_ai_generated") else "Authentic ✅"
+    label_ai = "AI-GENERATED ⚠️" if ai_det.get("is_ai") else "Authentic ✅"
     st.markdown(f"**Detection label:** {label_ai}")
     st.caption(ai_det.get("interpretation", ""))
 
@@ -334,18 +334,24 @@ with tabs[3]:
             '<span class="ml-tag">Ensemble ML active</span>',
             unsafe_allow_html=True,
         )
-    dfk_label = dfk_det.get("label", "UNKNOWN")
+    dfk_label = dfk_det.get("df_label") or dfk_det.get("label", "UNKNOWN")
     dfk_conf  = dfk_det.get("confidence", "")
     st.markdown(f"**Detection label:** {dfk_label}"
                 + (f" — confidence: {dfk_conf}" if dfk_conf else ""))
     st.caption(dfk_det.get("interpretation", ""))
 
-# ── Tab 4: SHAP ───────────────────────────────────────────────────────────────
+# ── Tab 4: Explainability (SHAP disabled) ─────────────────────────────────────
 with tabs[4]:
     shap_data = report.get("shap_explanations", {})
     if not shap_data:
-        st.info("SHAP explanations unavailable — feature vector could not be extracted.")
+        st.info(
+            "**Feature Explainability (SHAP) is currently disabled.**\n\n"
+            "The SHAP layer will be re-enabled once the ensemble classifiers "
+            "expose a compatible tree-based interface. All forensic scores above "
+            "are produced by the signal-processing + ML ensemble pipeline."
+        )
     else:
+        # Future: render SHAP results when re-enabled
         for mod, exp in shap_data.items():
             if not exp.get("available"):
                 st.warning(f"SHAP unavailable for **{mod}**: {exp.get('summary', '')}")
@@ -422,7 +428,7 @@ with tabs[5]:
         )
     with dc2:
         pdf = report.get("pdf_path")
-        if pdf and os.path.isfile(pdf):
+        if pdf and os.path.isfile(str(pdf)):
             with open(pdf, "rb") as fh:
                 st.download_button(
                     "⬇️ PDF Report",
