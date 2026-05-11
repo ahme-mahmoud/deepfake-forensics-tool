@@ -1,7 +1,7 @@
 """
-app.py  —  Hybrid AI Forensics Pipeline  v3.1
+app.py  —  Hybrid AI Forensics Pipeline  v4.0
 =============================================
-Full orchestration: Signal Processing + ML + SHAP + PDF + Forensic Report
+Full orchestration: Signal Processing + ML + PDF + Forensic Report
 
 USAGE:
     python app.py <image_path> [--case-id CASE-001]
@@ -13,8 +13,7 @@ PIPELINE:
     4. Splicing Detection     (ensemble classifier + signal heuristics)
     5. Deepfake Detection     (ensemble classifier + signal heuristics)
     6. Score Fusion           (signal + ML → hybrid score per module)
-    7. SHAP Explainability    (WHY was it flagged?)
-    8. Forensic Report        (JSON + TXT + PDF)
+    7. Forensic Report        (JSON + TXT + PDF)
 
 MODELS (models/):
     ai_gen_ensemble.pkl   ai_gen_scaler.pkl
@@ -36,13 +35,12 @@ _SRC  = _ROOT / "src"
 sys.path.insert(0, str(_ROOT))
 sys.path.insert(0, str(_SRC))
 
-# ── Core forensic modules (current names only) ────────────────────────────────
+# ── Core forensic modules (current architecture only) ────────────────────────
 from src import compression_analysis
 from src import ai_gen_module     as ai_gen_mod
 from src import splicing_module   as splicing_mod
 from src import deepfake_module   as deepfake_mod
 from src import report_generator
-from src import shap_explainer
 from src import pdf_report
 
 from src.feature_extractor import extract as extract_features
@@ -69,8 +67,8 @@ logger = logging.getLogger("app")
 
 BANNER = """
 ╔══════════════════════════════════════════════════════════════════╗
-║   AI-Powered Deepfake & Image Manipulation Detection Tool v3.1   ║
-║   Hybrid: Signal Processing + ML + SHAP + PDF Evidence Report    ║
+║   AI-Powered Deepfake & Image Manipulation Detection Tool v4.0   ║
+║   Hybrid: Signal Processing + ML Ensembles + PDF Evidence Report ║
 ╚══════════════════════════════════════════════════════════════════╝
 """
 
@@ -255,7 +253,8 @@ def run_pipeline(
     """
     Execute the full hybrid forensic pipeline.
 
-    Returns the master report dict (compatible with report_generator).
+    Returns the master report dict (new schema — compatible with
+    dashboard.py and pdf_report.py).
     """
     print(BANNER)
     logger.info("Image: %s", image_path)
@@ -266,13 +265,13 @@ def run_pipeline(
         logger.error("File not found: %s", image_path)
         sys.exit(1)
 
-    _check_models_or_exit()          # Abort cleanly if any .pkl is missing
+    _check_models_or_exit()
     os.makedirs(evidence_dir, exist_ok=True)
 
     # ══════════════════════════════════════════════════════════════════════════
     # STEP 1 — Feature Extraction
     # ══════════════════════════════════════════════════════════════════════════
-    logger.info("━━━━ [1/7] Feature Extraction ━━━━")
+    logger.info("━━━━ [1/6] Feature Extraction ━━━━")
     feat_vec = None
     try:
         features = extract_features(image_path)
@@ -284,32 +283,32 @@ def run_pipeline(
     # ══════════════════════════════════════════════════════════════════════════
     # STEP 2 — Compression / ELA Analysis
     # ══════════════════════════════════════════════════════════════════════════
-    logger.info("━━━━ [2/7] Compression / ELA Analysis ━━━━")
+    logger.info("━━━━ [2/6] Compression / ELA Analysis ━━━━")
     ela_result = _run_ela(image_path, ela_quality, ela_scale,
                           evidence_dir, save_evidence)
 
     # ══════════════════════════════════════════════════════════════════════════
     # STEP 3 — AI-Generated Image Detection
     # ══════════════════════════════════════════════════════════════════════════
-    logger.info("━━━━ [3/7] AI-Generated Detection ━━━━")
+    logger.info("━━━━ [3/6] AI-Generated Detection ━━━━")
     ai_result = _run_ai_gen(image_path, evidence_dir, save_evidence)
 
     # ══════════════════════════════════════════════════════════════════════════
     # STEP 4 — Splicing / Tampering Detection
     # ══════════════════════════════════════════════════════════════════════════
-    logger.info("━━━━ [4/7] Splicing Detection ━━━━")
+    logger.info("━━━━ [4/6] Splicing Detection ━━━━")
     splicing_result = _run_splicing(image_path, evidence_dir, save_evidence)
 
     # ══════════════════════════════════════════════════════════════════════════
     # STEP 5 — Deepfake Detection
     # ══════════════════════════════════════════════════════════════════════════
-    logger.info("━━━━ [5/7] Deepfake Detection ━━━━")
+    logger.info("━━━━ [5/6] Deepfake Detection ━━━━")
     deepfake_result = _run_deepfake(image_path, evidence_dir, save_evidence)
 
     # ══════════════════════════════════════════════════════════════════════════
     # STEP 6 — Score Fusion
     # ══════════════════════════════════════════════════════════════════════════
-    logger.info("━━━━ [6/7] Score Fusion ━━━━")
+    logger.info("━━━━ [6/6] Score Fusion ━━━━")
 
     ela_fused      = fuse_module_score(ela_result.get("ela_score", 0.0), None)
     ai_fused       = fuse_module_score(ai_result["_sig"],       ai_result["_ml"])
@@ -333,44 +332,28 @@ def run_pipeline(
     )
 
     # ── Annotate result dicts with fused scores for report_generator ───────────
-    ela_result["score"]               = ela_fused["fused_score"]
+    ela_result["score"]         = ela_fused["fused_score"]
 
-    ai_result["score"]                = ai_fused["fused_score"]
-    ai_result["ml_score"]             = ai_fused.get("ml_score")
-    ai_result["signal_score"]         = ai_fused["signal_score"]
-    # Normalise key that report_generator may expect
-    ai_result["ai_generated_score"]   = ai_result.get(
+    ai_result["score"]          = ai_fused["fused_score"]
+    ai_result["ml_score"]       = ai_fused.get("ml_score")
+    ai_result["signal_score"]   = ai_fused["signal_score"]
+    ai_result["ml_available"]   = ai_fused["ml_used"]
+    ai_result["ai_generated_score"] = ai_result.get(
         "probability_ai_generated", ai_fused["fused_score"])
 
-    splicing_result["score"]          = splicing_fused["fused_score"]
-    splicing_result["ml_score"]       = splicing_fused.get("ml_score")
-    splicing_result["signal_score"]   = splicing_fused["signal_score"]
+    splicing_result["score"]        = splicing_fused["fused_score"]
+    splicing_result["ml_score"]     = splicing_fused.get("ml_score")
+    splicing_result["signal_score"] = splicing_fused["signal_score"]
+    splicing_result["ml_available"] = splicing_fused["ml_used"]
     splicing_result["splicing_score"] = splicing_result.get(
         "probability_splicing", splicing_fused["fused_score"])
 
-    deepfake_result["score"]          = deepfake_fused["fused_score"]
-    deepfake_result["ml_score"]       = deepfake_fused.get("ml_score")
-    deepfake_result["signal_score"]   = deepfake_fused["signal_score"]
+    deepfake_result["score"]        = deepfake_fused["fused_score"]
+    deepfake_result["ml_score"]     = deepfake_fused.get("ml_score")
+    deepfake_result["signal_score"] = deepfake_fused["signal_score"]
+    deepfake_result["ml_available"] = deepfake_fused["ml_used"]
     deepfake_result["deepfake_score"] = deepfake_result.get(
         "probability_deepfake", deepfake_fused["fused_score"])
-
-    # ══════════════════════════════════════════════════════════════════════════
-    # STEP 6b — SHAP Explainability
-    # ══════════════════════════════════════════════════════════════════════════
-    logger.info("━━━━ [6b] SHAP Explainability ━━━━")
-    shap_results: dict = {}
-    if feat_vec is not None:
-        for mod in ("ai_gen", "splicing", "deepfake"):
-            try:
-                shap_results[mod] = shap_explainer.explain(mod, feat_vec)
-                if shap_results[mod].get("available"):
-                    logger.info("SHAP %s: dominant_domain=%s",
-                                mod, shap_results[mod].get("dominant_domain"))
-            except Exception as exc:
-                logger.warning("SHAP failed for %s: %s", mod, exc)
-                shap_results[mod] = {"available": False, "summary": str(exc)}
-    else:
-        logger.warning("Feature vector unavailable — SHAP skipped")
 
     # ══════════════════════════════════════════════════════════════════════════
     # STEP 7 — Build Master Report Dict & Save
@@ -387,20 +370,27 @@ def run_pipeline(
         case_id         = case_id,
     )
 
-    # Override final verdict with hybrid fused values
+    # ── report_generator already sets these correctly via score_fusion,
+    #    but we override to guarantee the pipeline's own fusion_result is
+    #    authoritative (single source of truth).
     report["final"]["manipulation_probability"] = fusion_result["final_score"]
-    report["final"]["confidence"]               = fusion_result["confidence"]
+    report["final"]["confidence"]               = fusion_result["confidence"].upper()
     report["final"]["dominant_module"]          = fusion_result.get("dominant_module")
-    report["final"]["label"] = report_generator._score_label(
+    report["final"]["modules_above_50pct"]      = fusion_result.get("modules_above_50pct", 0)
+    report["final"]["label"]                    = report_generator._score_label(
         fusion_result["final_score"])
-    report["final"]["recommendation"] = report_generator._overall_recommendation(
+    report["final"]["recommendation"]           = report_generator._overall_recommendation(
         fusion_result["final_score"])
 
-    # Attach supplementary data
-    report["shap_explanations"]  = shap_results
-    report["fusion_breakdown"]   = fusion_result
-    report["feature_vector_dim"] = int(len(feat_vec)) if feat_vec is not None else 0
-    report["elapsed_seconds"]    = round(time.perf_counter() - t0, 2)
+    # ── fusion_breakdown = the weighted_breakdown dict (module → contribution)
+    report["fusion_breakdown"]    = fusion_result["weighted_breakdown"]
+
+    # ── SHAP disabled — always empty
+    report["shap_explanations"]   = {}
+
+    # ── Supplementary metadata
+    report["feature_vector_dim"]  = int(len(feat_vec)) if feat_vec is not None else 0
+    report["elapsed_seconds"]     = round(time.perf_counter() - t0, 2)
 
     # ── Persist reports ────────────────────────────────────────────────────────
     if save_evidence:
@@ -408,12 +398,11 @@ def run_pipeline(
         logger.info("JSON → %s", paths.get("json"))
         logger.info("TXT  → %s", paths.get("txt"))
 
+        # pdf_report.generate() sets report["pdf_path"] internally
         try:
-            pdf_path = os.path.join(
-                out_dir, f"forensic_report_{report['case_id']}.pdf")
-            pdf_report.generate(report, pdf_path)
-            report["pdf_path"] = pdf_path
-            logger.info("PDF  → %s", pdf_path)
+            pdf_report.generate(report, output_dir=out_dir)
+            if report.get("pdf_path"):
+                logger.info("PDF  → %s", report["pdf_path"])
         except Exception as exc:
             logger.warning("PDF generation failed: %s", exc)
             report["pdf_path"] = None
@@ -428,7 +417,7 @@ def run_pipeline(
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Hybrid AI Forensics Pipeline v3.1",
+        description="Hybrid AI Forensics Pipeline v4.0",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("image_path",
