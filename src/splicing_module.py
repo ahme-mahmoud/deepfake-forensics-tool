@@ -45,7 +45,7 @@ from sklearn.svm import SVC
 
 logger = logging.getLogger("splicing_module")
 
-_ROOT      = Path(__file__).parent.parent.parent
+_ROOT      = Path(__file__).parent.parent
 MODELS_DIR = _ROOT / "models"
 
 # ── Config ─────────────────────────────────────────────────────────────────────
@@ -679,7 +679,12 @@ def _load_models() -> bool:
         return False
 
 
-def predict(image_path: str) -> Dict[str, Any]:
+def predict(
+    image_path: str,
+    evidence_dir=None,
+    save_evidence: bool = True,
+    threshold: float = DECISION_THRESHOLD,
+) -> Dict[str, Any]:
     """
     Predict P(spliced/tampered) for a single image.
 
@@ -708,7 +713,7 @@ def predict(image_path: str) -> Dict[str, Any]:
             "is_spliced": False,
             "ml_score": 0.0, "signal_score": 0.0,
             "ml_available": False, "confidence": 0.0,
-            "threshold": DECISION_THRESHOLD,
+            "threshold": threshold,
             "error": str(e),
         }
 
@@ -718,12 +723,12 @@ def predict(image_path: str) -> Dict[str, Any]:
         logger.warning("Models not trained — signal score only")
         return {
             "probability_splicing": round(signal_score, 4),
-            "is_spliced": signal_score >= DECISION_THRESHOLD,
+            "is_spliced": signal_score >= threshold,
             "ml_score": signal_score,
             "signal_score": round(signal_score, 4),
             "ml_available": False,
             "confidence": round(abs(signal_score - 0.5) * 2, 4),
-            "threshold": DECISION_THRESHOLD,
+            "threshold": threshold,
         }
 
     feat_s  = _scaler.transform(feat.reshape(1, -1))
@@ -737,17 +742,17 @@ def predict(image_path: str) -> Dict[str, Any]:
 
     logger.info(
         "Splicing predict: ML=%.4f  signal=%.4f  →  %.4f  (thr=%.2f)",
-        ml_prob, signal_score, combined, DECISION_THRESHOLD,
+        ml_prob, signal_score, combined, threshold,
     )
 
     return {
         "probability_splicing": combined,
-        "is_spliced"          : combined >= DECISION_THRESHOLD,
+        "is_spliced"          : combined >= threshold,
         "ml_score"            : round(ml_prob,      4),
         "signal_score"        : round(signal_score, 4),
         "ml_available"        : True,
         "confidence"          : round(abs(combined - 0.5) * 2, 4),
-        "threshold"           : DECISION_THRESHOLD,
+        "threshold"           : threshold,
     }
 
 
